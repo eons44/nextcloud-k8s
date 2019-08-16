@@ -1,0 +1,257 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app: nextcloud
+    name: nextcloud
+    version: "15"
+  name: nextcloud
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app: nextcloud
+    version: "15"
+  name: nextcloud-app-pvc
+  namespace: nextcloud
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: rook-ceph-block
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app: nextcloud
+    version: "15"
+  name: nextcloud-db-pvc
+  namespace: nextcloud
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: rook-ceph-block
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: certmanager.k8s.io/v1alpha1
+kind: Certificate
+metadata:
+  name: nc-cert
+  namespace: nextcloud
+spec:
+  commonName: YOUR DOMAIN
+  secretName: nc-cert-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt
+---
+apiVersion: v1
+data:
+  MYSQL_DATABASE: BASE 64 ENCODED DATABASE NAME
+  MYSQL_PASSWORD: BASE64 ENCODED PASSWORD
+  MYSQL_ROOT_PASSWORD: BASE 64 ENCODED PASSWORD
+  MYSQL_USER: BASE 64 ENCODED USERNAME
+kind: Secret
+metadata:
+  labels:
+    app: nextcloud
+    version: "15"
+  name: nextcloud-db-secrets
+  namespace: nextcloud
+type: Opaque
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: nextcloud
+    component: app
+    version: "15"
+  name: nextcloud-app
+  namespace: nextcloud
+spec:
+  ports:
+  - port: 80
+  selector:
+    app: nextcloud
+    component: app
+    version: "15"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: nextcloud
+    component: db
+    version: "15"
+  name: nextcloud-db
+  namespace: nextcloud
+spec:
+  ports:
+  - port: 3306
+  selector:
+    app: nextcloud
+    component: db
+    version: "15"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: nextcloud
+    component: app
+    version: "15"
+  name: nextcloud-app
+  namespace: nextcloud
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nextcloud
+      component: app
+      version: "15"
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: nextcloud
+        component: app
+        version: "15"
+    spec:
+      containers:
+      - env:
+        - name: MYSQL_HOST
+          value: nextcloud-db
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_DATABASE
+              name: nextcloud-db-secrets
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_PASSWORD
+              name: nextcloud-db-secrets
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_USER
+              name: nextcloud-db-secrets
+        image: nextcloud:16.0.3-apache
+        imagePullPolicy: Always
+        name: app
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - mountPath: /var/www/html
+          name: app-persistent-storage
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 500Mi
+          limits:
+            cpu: 2000m
+            memory: 1000Mi
+      restartPolicy: Always
+      volumes:
+      - name: app-persistent-storage
+        persistentVolumeClaim:
+          claimName: nextcloud-app-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: nextcloud
+    component: db
+    version: "15"
+  name: nextcloud-db
+  namespace: nextcloud
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nextcloud
+      component: db
+      version: "15"
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: nextcloud
+        component: db
+        version: "15"
+    spec:
+      containers:
+      - args:
+        - --transaction-isolation=READ-COMMITTED
+        - --binlog-format=ROW
+        - --max-connections=1000
+        env:
+        - name: MYSQL_DATABASE
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_DATABASE
+              name: nextcloud-db-secrets
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_PASSWORD
+              name: nextcloud-db-secrets
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_ROOT_PASSWORD
+              name: nextcloud-db-secrets
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              key: MYSQL_USER
+              name: nextcloud-db-secrets
+        image: mariadb:10.2.26-bionic
+        name: db
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: db-persistent-storage
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 500Mi
+          limits:
+            memory: 2000Mi
+            cpu: 1000m
+      restartPolicy: Always
+      volumes:
+      - name: db-persistent-storage
+        persistentVolumeClaim:
+          claimName: nextcloud-db-pvc
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  labels:
+    app: nextcloud
+    version: "15"
+  name: nextcloud-ingress
+  namespace: nextcloud
+spec:
+  rules:
+  - host: YOUR DOMAIN
+    http:
+      paths:
+      - backend:
+          serviceName: nextcloud-app
+          servicePort: 80
+  tls:
+  - secretName: nc-cert-tls
+---

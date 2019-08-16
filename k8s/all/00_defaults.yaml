@@ -1,0 +1,20 @@
+# apiVersion: v1
+# kind: LimitRange
+# metadata:
+#   name: resources
+# spec:
+#   limits:
+#   - default:
+#       cpu: 1000m
+#       memory: 1000Mi
+#     defaultRequest:
+#       cpu: 1000m
+#       memory: 1000Mi
+#     max:
+#       memory: 16000Mi
+#       cpu: 80000m
+#     min:
+#       memory: 8Mi
+#       cpu: 1m
+#     type: Container
+# ---
